@@ -12,7 +12,10 @@ namespace FastTechFoods.AuthService.Api.Controllers
     public class UserController : ControllerBase
     {
         private readonly IUserService _userService;
-        public UserController(IUserService authService) => _userService = authService;
+        public UserController(IUserService authService)
+        {
+            _userService = authService;
+        }
 
         /// <summary>
         /// Lista os usuários do sistema.

@@ -8,17 +8,28 @@ using FastTechFoods.AuthService.Infrastructure.Services;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Serilog;
+using Serilog.Context;
 using System.Reflection;
 using System.Text;
+
 
 namespace FastTechFoods.AuthService.Api
 {
     public class Program
     {
         public static void Main(string[] args)
-        {
+        { 
             var builder = WebApplication.CreateBuilder(args);
-            
+
+            builder.Host.UseSerilog((context, configuration) =>
+            {
+                configuration
+                    .ReadFrom.Configuration(context.Configuration) // Lê as configurações do appsettings.json
+                    .Enrich.FromLogContext()                          // Adiciona informações de rastreio (Trace ID)
+                    .WriteTo.Console();                            // Define a saída para o terminal!
+            });
+
             var connectionString = Environment.GetEnvironmentVariable("CONNECTION_DATABASE") ??
                 builder.Configuration.GetConnectionString("DefaultConnection");
 
@@ -84,7 +95,25 @@ namespace FastTechFoods.AuthService.Api
             });
 
             var app = builder.Build();
+            app.UseMiddleware<GlobalExceptionMiddleware>();
+            app.Use(async (context, next) =>
+            {
+                // Tenta pegar o IP do cabeçalho de proxy (ex: Nginx, Cloudflare, AWS)
+                var clientIp = context.Request.Headers["X-Forwarded-For"].FirstOrDefault();
 
+                // Se não tiver proxy, pega o IP direto da conexão do Kestrel
+                if (string.IsNullOrEmpty(clientIp))
+                {
+                    clientIp = context.Connection.RemoteIpAddress?.ToString() ?? "IP_Desconhecido";
+                }
+
+                // O "using" garante que a propriedade "ClientIp" exista apenas durante esta requisição.
+                // Qualquer log gerado a partir daqui vai herdar essa propriedade automaticamente.
+                using (LogContext.PushProperty("ClientIp", clientIp))
+                {
+                    await next(context);
+                }
+            });
             //Migrations
             using (var scope = app.Services.CreateScope())
             {
@@ -98,7 +127,7 @@ namespace FastTechFoods.AuthService.Api
             app.UseHttpsRedirection();
             app.UseAuthentication();
             app.UseAuthorization();
-
+            app.UseSerilogRequestLogging();
             app.MapControllers();
 
             DbInitializer.Seed(app.Services);
